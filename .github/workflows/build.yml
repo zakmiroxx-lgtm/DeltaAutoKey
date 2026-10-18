@@ -1,0 +1,43 @@
+name: Delta Auto Key Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore src/DeltaAutoKey/DeltaAutoKey.csproj
+
+      - name: Publish EXE
+        run: >
+          dotnet publish
+          src/DeltaAutoKey/DeltaAutoKey.csproj
+          -c Release
+          -r win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:PublishTrimmed=false
+          -o publish
+
+      - name: Upload EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: DeltaAutoKey-Windows
+          path: publish/DeltaAutoKey.exe
