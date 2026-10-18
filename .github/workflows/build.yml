@@ -22,38 +22,52 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: Show repository files
+      - name: Find and Extract ZIP
         shell: pwsh
         run: |
-          Write-Host "Repository structure:"
-          Get-ChildItem -Recurse | Select-Object FullName
+          Write-Host "Searching ZIP archives..."
 
-      - name: Find project file
-        shell: pwsh
-        run: |
-          $projects = Get-ChildItem -Recurse -Filter "*.csproj"
+          $zip = Get-ChildItem -Path . -Filter "*.zip" -Recurse |
+            Select-Object -First 1
 
-          if (-not $projects) {
-            Write-Error "ERROR: No .csproj files found!"
+          if (-not $zip) {
+            Write-Error "ZIP archive not found!"
             exit 1
           }
 
-          Write-Host "Found projects:"
-          $projects | ForEach-Object {
-            Write-Host $_.FullName
-          }
+          Write-Host "Found ZIP: $($zip.FullName)"
 
-      - name: Restore dependencies
+          $extractPath = Join-Path $env:GITHUB_WORKSPACE "extracted"
+
+          New-Item -ItemType Directory -Force -Path $extractPath | Out-Null
+
+          Expand-Archive -Path $zip.FullName -DestinationPath $extractPath -Force
+
+          Write-Host "ZIP extracted successfully!"
+
+          Get-ChildItem -Path $extractPath -Recurse |
+            Select-Object FullName
+
+      - name: Find Project
         shell: pwsh
         run: |
-          $project = Get-ChildItem -Recurse -Filter "DeltaAutoKey.csproj" | Select-Object -First 1
+          $project = Get-ChildItem -Path extracted -Recurse -Filter "DeltaAutoKey.csproj" |
+            Select-Object -First 1
 
           if (-not $project) {
-            Write-Error "DeltaAutoKey.csproj not found!"
+            Write-Error "DeltaAutoKey.csproj not found inside ZIP!"
             exit 1
           }
 
-          dotnet restore "$($project.FullName)"
+          Write-Host "Project found: $($project.FullName)"
+
+          "PROJECT_PATH=$($project.FullName)" |
+            Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Restore Dependencies
+        shell: pwsh
+        run: |
+          dotnet restore "$env:PROJECT_PATH"
 
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
@@ -62,14 +76,7 @@ jobs:
       - name: Build Windows EXE
         shell: pwsh
         run: |
-          $project = Get-ChildItem -Recurse -Filter "DeltaAutoKey.csproj" | Select-Object -First 1
-
-          if (-not $project) {
-            Write-Error "DeltaAutoKey.csproj not found!"
-            exit 1
-          }
-
-          dotnet publish "$($project.FullName)" `
+          dotnet publish "$env:PROJECT_PATH" `
             -c Release `
             -r win-x64 `
             --self-contained true `
