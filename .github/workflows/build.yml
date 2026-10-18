@@ -11,9 +11,13 @@ permissions:
 
 jobs:
   build:
+
+    name: Build Windows EXE
+
     runs-on: windows-latest
 
     steps:
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -22,12 +26,22 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: Find and Extract ZIP
+      - name: Show .NET information
         shell: pwsh
         run: |
-          Write-Host "Searching ZIP archives..."
+          dotnet --info
 
-          $zip = Get-ChildItem -Path . -Filter "*.zip" -Recurse |
+      - name: Find ZIP archive
+        shell: pwsh
+        run: |
+
+          Write-Host "Searching for Delta Auto Key ZIP..."
+
+          $zip = Get-ChildItem `
+            -Path $env:GITHUB_WORKSPACE `
+            -Filter "*.zip" `
+            -File `
+            -Recurse |
             Select-Object -First 1
 
           if (-not $zip) {
@@ -35,62 +49,138 @@ jobs:
             exit 1
           }
 
-          Write-Host "Found ZIP: $($zip.FullName)"
+          Write-Host "ZIP found:"
+          Write-Host $zip.FullName
 
-          $extractPath = Join-Path $env:GITHUB_WORKSPACE "extracted"
+          "ZIP_PATH=$($zip.FullName)" |
+            Out-File `
+              -FilePath $env:GITHUB_ENV `
+              -Append `
+              -Encoding utf8
 
-          New-Item -ItemType Directory -Force -Path $extractPath | Out-Null
-
-          Expand-Archive -Path $zip.FullName -DestinationPath $extractPath -Force
-
-          Write-Host "ZIP extracted successfully!"
-
-          Get-ChildItem -Path $extractPath -Recurse |
-            Select-Object FullName
-
-      - name: Find Project
+      - name: Extract project
         shell: pwsh
         run: |
-          $project = Get-ChildItem -Path extracted -Recurse -Filter "DeltaAutoKey.csproj" |
+
+          Write-Host "Extracting project..."
+
+          $destination = Join-Path `
+            $env:GITHUB_WORKSPACE `
+            "extracted"
+
+          New-Item `
+            -ItemType Directory `
+            -Path $destination `
+            -Force |
+            Out-Null
+
+          Expand-Archive `
+            -Path $env:ZIP_PATH `
+            -DestinationPath $destination `
+            -Force
+
+          Write-Host "Extraction completed!"
+
+      - name: Find DeltaAutoKey.csproj
+        shell: pwsh
+        run: |
+
+          $project = Get-ChildItem `
+            -Path extracted `
+            -Filter "DeltaAutoKey.csproj" `
+            -File `
+            -Recurse |
             Select-Object -First 1
 
           if (-not $project) {
-            Write-Error "DeltaAutoKey.csproj not found inside ZIP!"
+            Write-Error "DeltaAutoKey.csproj not found!"
             exit 1
           }
 
-          Write-Host "Project found: $($project.FullName)"
+          Write-Host "Project found:"
+          Write-Host $project.FullName
 
           "PROJECT_PATH=$($project.FullName)" |
-            Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            Out-File `
+              -FilePath $env:GITHUB_ENV `
+              -Append `
+              -Encoding utf8
 
-      - name: Restore Dependencies
+      - name: Restore dependencies
         shell: pwsh
         run: |
-          dotnet restore "$env:PROJECT_PATH"
+
+          Write-Host "Restoring dependencies..."
+
+          dotnet restore "$env:PROJECT_PATH" `
+            --runtime win-x64
 
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
           }
 
-      - name: Build Windows EXE
+      - name: Build Delta Auto Key
         shell: pwsh
         run: |
+
+          Write-Host "Building Delta Auto Key..."
+
           dotnet publish "$env:PROJECT_PATH" `
             -c Release `
             -r win-x64 `
             --self-contained true `
+            --no-restore `
+            -p:PlatformTarget=x64 `
             -p:PublishSingleFile=true `
             -p:PublishTrimmed=false `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:IncludeAllContentForSelfExtract=true `
+            -p:EnableCompressionInSingleFile=true `
+            -p:DebugType=none `
+            -p:DebugSymbols=false `
             -o publish
 
           if ($LASTEXITCODE -ne 0) {
+            Write-Error "BUILD FAILED!"
             exit $LASTEXITCODE
           }
 
-      - name: Upload EXE
+          Write-Host "BUILD SUCCESSFUL!"
+
+      - name: Verify EXE
+        shell: pwsh
+        run: |
+
+          $exe = Join-Path `
+            $env:GITHUB_WORKSPACE `
+            "publish/DeltaAutoKey.exe"
+
+          if (-not (Test-Path $exe)) {
+            Write-Error "DeltaAutoKey.exe not found!"
+            exit 1
+          }
+
+          $file = Get-Item $exe
+
+          Write-Host "EXE created successfully!"
+
+          Write-Host "File:"
+          Write-Host $file.FullName
+
+          Write-Host "Size:"
+          Write-Host "$([math]::Round($file.Length / 1MB, 2)) MB"
+
+          $hash = Get-FileHash `
+            -Path $exe `
+            -Algorithm SHA256
+
+          Write-Host "SHA256:"
+          Write-Host $hash.Hash
+
+      - name: Upload Windows EXE
         uses: actions/upload-artifact@v4
         with:
-          name: DeltaAutoKey-Windows
+          name: DeltaAutoKey-v1.1-Windows-x64
           path: publish/DeltaAutoKey.exe
           if-no-files-found: error
+          retention-days: 30
