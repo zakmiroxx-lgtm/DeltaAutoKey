@@ -14,30 +14,76 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup .NET
+      - name: Setup .NET 8
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
 
-      - name: Restore
-        run: dotnet restore src/DeltaAutoKey/DeltaAutoKey.csproj
+      - name: Show repository files
+        shell: pwsh
+        run: |
+          Write-Host "Repository structure:"
+          Get-ChildItem -Recurse | Select-Object FullName
 
-      - name: Publish EXE
-        run: >
-          dotnet publish
-          src/DeltaAutoKey/DeltaAutoKey.csproj
-          -c Release
-          -r win-x64
-          --self-contained true
-          -p:PublishSingleFile=true
-          -p:PublishTrimmed=false
-          -o publish
+      - name: Find project file
+        shell: pwsh
+        run: |
+          $projects = Get-ChildItem -Recurse -Filter "*.csproj"
+
+          if (-not $projects) {
+            Write-Error "ERROR: No .csproj files found!"
+            exit 1
+          }
+
+          Write-Host "Found projects:"
+          $projects | ForEach-Object {
+            Write-Host $_.FullName
+          }
+
+      - name: Restore dependencies
+        shell: pwsh
+        run: |
+          $project = Get-ChildItem -Recurse -Filter "DeltaAutoKey.csproj" | Select-Object -First 1
+
+          if (-not $project) {
+            Write-Error "DeltaAutoKey.csproj not found!"
+            exit 1
+          }
+
+          dotnet restore "$($project.FullName)"
+
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Build Windows EXE
+        shell: pwsh
+        run: |
+          $project = Get-ChildItem -Recurse -Filter "DeltaAutoKey.csproj" | Select-Object -First 1
+
+          if (-not $project) {
+            Write-Error "DeltaAutoKey.csproj not found!"
+            exit 1
+          }
+
+          dotnet publish "$($project.FullName)" `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:PublishTrimmed=false `
+            -o publish
+
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
 
       - name: Upload EXE
         uses: actions/upload-artifact@v4
         with:
           name: DeltaAutoKey-Windows
           path: publish/DeltaAutoKey.exe
+          if-no-files-found: error
